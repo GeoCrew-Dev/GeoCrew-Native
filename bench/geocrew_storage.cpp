@@ -30,7 +30,9 @@ constexpr int kBulk = 100000;   // features written in one transaction
 constexpr int kSingles = 1000;  // features committed one at a time, like saving each field point
 constexpr int kBatch = 100;     // features per transaction in the crash test
 constexpr int kCrashRounds = 20;
-constexpr double kDeadlineMs = 120000;  // a scenario slower than two minutes stops and reports its rate
+// Inserts that take longer than two minutes stop and report their rate. The
+// deadline covers the inserts only, not the commit or the spatial index build.
+constexpr double kDeadlineMs = 120000;
 
 int failures = 0;
 
@@ -241,7 +243,7 @@ void crash(const std::string &dir) {
         } else {
             std::printf("  round %d: rows %lld, reported %lld\n", round, s.rows, reported);
         }
-        before = s.rows;
+        if (s.rows >= 0) before = s.rows;
     }
     report("crash rounds recovered", msSince(t0),
            CPLSPrintf("%d of %d, %lld rows at the end", recovered, kCrashRounds, before));

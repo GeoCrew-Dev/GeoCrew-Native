@@ -3,7 +3,7 @@
 # the stripped libraries and data files from scripts/stage-android.sh.
 # Usage: scripts/run-bench.sh <triplet> [program [args...]]
 #   default program: geocrew_bench, run on its own directory on the device
-#   e.g. scripts/run-bench.sh x64-android geocrew_storage /sdcard/Download/geocrew-storage
+#   e.g. scripts/run-bench.sh x64-android geocrew_storage /sdcard/GeoCrew-spike
 # Arguments must not contain spaces. Set ANDROID_SERIAL when several devices are attached.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1 # Git Bash on Windows would rewrite the device paths
