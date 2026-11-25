@@ -75,7 +75,11 @@ def choices(expression):
 def main(installed, triplet):
     root = pathlib.Path(installed)
     failures = []
-    for spdx in sorted(root.glob(f"{triplet}/share/*/vcpkg.spdx.json")):
+    found = sorted(root.glob(f"{triplet}/share/*/vcpkg.spdx.json"))
+    if not found:
+        print(f"no packages found under {root / triplet}", file=sys.stderr)
+        return 1
+    for spdx in found:
         port = spdx.parent.name
         doc = json.loads(spdx.read_text(encoding="utf-8"))
         package = next(p for p in doc["packages"] if p.get("SPDXID") == "SPDXRef-port")

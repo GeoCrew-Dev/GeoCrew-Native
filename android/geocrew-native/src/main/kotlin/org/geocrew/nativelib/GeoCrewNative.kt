@@ -21,6 +21,10 @@ object GeoCrewNative {
      */
     @JvmStatic external fun setup(dataDir: String)
 
-    /** Runs `gdal <args>`, returning its text output, or null on failure. */
-    @JvmStatic external fun run(args: Array<String>): String?
+    /**
+     * Runs `gdal <args>` and returns its text output (empty for algorithms that
+     * only write files). Throws [RuntimeException] with GDAL's error message
+     * when the arguments are wrong or the algorithm fails.
+     */
+    @JvmStatic external fun run(args: Array<String>): String
 }

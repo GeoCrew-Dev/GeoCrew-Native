@@ -3,7 +3,7 @@ package org.geocrew.nativelib
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -43,15 +43,35 @@ class GeoCrewNativeTest {
                 """"properties":{"rock":"花岗岩露头"},"geometry":{"type":"Point","coordinates":[114.0,30.0]}}]}""",
         )
         val output = File(dir, "outcrop.gpkg").apply { delete() }
-        val converted = GeoCrewNative.run(
+        GeoCrewNative.run(
             arrayOf("vector", "pipeline", "read", input.path, "!", "reproject", "--dst-crs", "EPSG:4547", "!", "write", output.path),
         )
-        assertNotNull("pipeline failed", converted)
         val info = GeoCrewNative.run(arrayOf("vector", "info", "--format=json", "--features", output.path))
-        assertNotNull("info failed", info)
-        assertTrue(info!!, info.contains("4547"))
+        assertTrue(info, info.contains("4547"))
         assertTrue(info, info.contains("花岗岩露头"))
         // 114E 30N on the 114E central meridian: northing about 3320113.4 m.
         assertTrue(info, info.contains("3320113"))
+    }
+
+    // Characters outside the BMP take four bytes in UTF-8; JNI's modified UTF-8 would garble them.
+    @Test
+    fun keepsCharactersOutsideTheBmp() {
+        val name = "𠮷家坪" // 𠮷家坪
+        val input = File(dir, "place.geojson")
+        input.writeText(
+            """{"type":"FeatureCollection","features":[{"type":"Feature",""" +
+                """"properties":{"name":"$name"},"geometry":{"type":"Point","coordinates":[114.0,30.0]}}]}""",
+        )
+        val info = GeoCrewNative.run(arrayOf("vector", "info", "--format=json", "--features", input.path))
+        assertTrue(info, info.contains(name))
+    }
+
+    @Test
+    fun failureCarriesGdalMessage() {
+        val missing = File(dir, "missing.gpkg").path
+        val error = assertThrows(RuntimeException::class.java) {
+            GeoCrewNative.run(arrayOf("vector", "info", missing))
+        }
+        assertTrue(error.message, error.message.orEmpty().contains("missing.gpkg"))
     }
 }
