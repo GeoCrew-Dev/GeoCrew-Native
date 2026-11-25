@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ndk=${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}
-ndk=${ndk//\//}
+ndk=$(printf '%s' "$ndk" | tr '\\' /) # Windows paths use backslashes
 readelf=$(ls "$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-readelf* | head -n 1)
 status=0
 table="| ABI | Library | Size (KB) | gzip -9 (KB) |

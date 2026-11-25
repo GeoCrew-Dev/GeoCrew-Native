@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ndk=${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}
-ndk=${ndk//\//}
+ndk=$(printf '%s' "$ndk" | tr '\\' /) # Windows paths use backslashes
 strip=$(ls "$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-strip* | head -n 1)
 out=build/android
 rm -rf "$out"
