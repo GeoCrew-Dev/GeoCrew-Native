@@ -9,7 +9,7 @@
 // --version prints the library versions. PROJ's and GDAL's data files are read
 // from the "data" directory next to the executable, unless PROJ_DATA or
 // GDAL_DATA is set. Exit status: 0 done, 1 the algorithm failed, 2 bad arguments.
-#include <climits>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,20 +28,22 @@
 #include <ogr_srs_api.h>
 #include <proj.h>
 
+constexpr int kPathSize = 4096;  // at least PATH_MAX on every supported system
+
 // The path of this executable. GDAL's CPLGetExecPath covers Windows and Linux only.
-static bool execPath(char *out, int size) {
+static bool execPath(char (&out)[kPathSize]) {
 #ifdef __APPLE__
-    char raw[PATH_MAX];
+    char raw[kPathSize];
     uint32_t n = sizeof raw;
-    return _NSGetExecutablePath(raw, &n) == 0 && realpath(raw, out) != nullptr && size >= PATH_MAX;
+    return _NSGetExecutablePath(raw, &n) == 0 && realpath(raw, out) != nullptr;
 #else
-    return CPLGetExecPath(out, size);
+    return CPLGetExecPath(out, kPathSize);
 #endif
 }
 
 int main(int argc, char **argv) {
-    char exe[PATH_MAX > 4096 ? PATH_MAX : 4096];
-    if (execPath(exe, sizeof exe)) {
+    char exe[kPathSize];
+    if (execPath(exe)) {
         const std::string data = CPLFormFilenameSafe(CPLGetDirnameSafe(exe).c_str(), "data", nullptr);
         if (!std::getenv("PROJ_DATA")) {
             const char *const paths[] = {data.c_str(), nullptr};
@@ -74,9 +76,7 @@ int main(int argc, char **argv) {
             if (GDALAlgorithmArgH arg = GDALAlgorithmGetArg(alg, "output-string")) {
                 const char *out = GDALAlgorithmArgGetAsString(arg);
                 std::fputs(out, stdout);
-                if (*out && out[std::strlen(out) - 1] != '
-') std::fputc('
-', stdout);
+                if (*out && out[std::strlen(out) - 1] != '\n') std::fputc('\n', stdout);
                 GDALAlgorithmArgRelease(arg);
             }
         } else {
