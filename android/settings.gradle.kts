@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "geocrew-native-android"
-include(":geocrew-native", ":sample")
+include(":geocrew-native", ":sample", ":mapspike")
