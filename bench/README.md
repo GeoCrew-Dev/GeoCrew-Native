@@ -24,3 +24,20 @@ scripts/run-bench.sh x64-android
 `run-bench.sh` 把剥离过符号的程序、整理好的动态库推到设备的 `/data/local/tmp/geocrew-bench/` 下，`proj.db` 和 GDAL 的数据文件放在其中的 `data/`，再运行。
 
 模拟器跑在电脑的 CPU 上，测出的时间只能看相对快慢；手机上的真实速度要用 arm64 真机测。
+
+# geocrew_storage
+
+测 GeoPackage 放在不同位置时的速度和崩溃恢复，用来决定工程文件放在哪里：/sdcard（经过 FUSE）、应用私有目录、外置存储卡。每个目录分别用 SQLite 的 DELETE 和 WAL 两种日志模式测：
+
+- 一个事务写 10 万个点（新建文件，GDAL 对新建文件默认不做 fsync）；
+- 重新打开后逐条提交 1000 个点，像野外每定一个点就保存一次（SQLite 默认每次提交都 fsync）；
+- 读出全部要素；
+- 崩溃恢复：子进程不停地每 100 个点提交一次，在随机时刻被 `kill -9`，共 20 轮。每轮之后重新打开文件，检查 `PRAGMA integrity_check`、空间索引的条数与数据一致，并且已提交的都在、没提交的都不在。
+
+杀进程只能模拟应用崩溃，模拟不了断电。
+
+```sh
+scripts/run-bench.sh x64-android geocrew_storage /data/local/tmp/geocrew-bench/private /sdcard/GeoCrew-spike
+```
+
+参数是设备上的目录，测完会删掉测试文件，但不删目录。
