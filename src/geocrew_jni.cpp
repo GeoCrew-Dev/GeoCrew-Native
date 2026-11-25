@@ -3,15 +3,21 @@
 // make the linker keep everything the app will use (drivers and algorithms).
 #include <jni.h>
 
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
 #include <cpl_string.h>
 #include <gdal.h>
+#include <gdal_priv.h>
 #include <gdalalgorithm.h>
 #include <geos_c.h>
 #include <ogr_srs_api.h>
+#include <ogrsf_frmts.h>
 #include <proj.h>
 
 namespace {
@@ -162,4 +168,95 @@ Java_org_geocrew_nativelib_GeoCrewNative_run(JNIEnv *env, jclass, jobjectArray a
     }
     GDALAlgorithmRelease(root);
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Map spike (M1): what CustomGeometrySource needs. Datasets stay open between
+// calls, because MapLibre asks for every tile separately, from several threads;
+// one lock serialises them.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::mutex gDatasetsLock;
+std::map<std::string, std::unique_ptr<GDALDataset>> gDatasets;
+
+// The open dataset for path, opened for update on first use. Call with gDatasetsLock held.
+GDALDataset *dataset(const std::string &path) {
+    auto &ds = gDatasets[path];
+    if (!ds) ds.reset(GDALDataset::Open(path.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE));
+    return ds.get();
+}
+
+}  // namespace
+
+// Runs sql, which must return a point geometry and an integer class as its
+// first field, and returns {double[] x0,y0,x1,y1,..., int[] classes}.
+// Throws with GDAL's message when the query fails.
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_org_geocrew_nativelib_GeoCrewNative_queryPoints(JNIEnv *env, jclass, jstring path, jstring sql) {
+    if (!path || !sql) {
+        throwIllegalArgument(env, "path or sql is null");
+        return nullptr;
+    }
+    const std::string p = toUtf8(env, path), q = toUtf8(env, sql);
+    std::vector<double> xy;
+    std::vector<jint> classes;
+    {
+        std::lock_guard<std::mutex> lock(gDatasetsLock);
+        CPLErrorReset();
+        GDALDataset *ds = dataset(p);
+        OGRLayer *rs = ds ? ds->ExecuteSQL(q.c_str(), nullptr, nullptr) : nullptr;
+        if (!rs) {
+            throwGdalError(env, "query failed");
+            return nullptr;
+        }
+        for (auto &f : *rs) {
+            const OGRGeometry *g = f->GetGeometryRef();
+            if (!g || wkbFlatten(g->getGeometryType()) != wkbPoint) continue;
+            xy.push_back(g->toPoint()->getX());
+            xy.push_back(g->toPoint()->getY());
+            classes.push_back(f->GetFieldCount() > 0 ? f->GetFieldAsInteger(0) : 0);
+        }
+        ds->ReleaseResultSet(rs);
+    }
+    jdoubleArray coords = env->NewDoubleArray(static_cast<jsize>(xy.size()));
+    env->SetDoubleArrayRegion(coords, 0, static_cast<jsize>(xy.size()), xy.data());
+    jintArray cls = env->NewIntArray(static_cast<jsize>(classes.size()));
+    env->SetIntArrayRegion(cls, 0, static_cast<jsize>(classes.size()), classes.data());
+    jobjectArray out = env->NewObjectArray(2, env->FindClass("java/lang/Object"), nullptr);
+    env->SetObjectArrayElement(out, 0, coords);
+    env->SetObjectArrayElement(out, 1, cls);
+    return out;
+}
+
+// Moves point feature fid of layer to (x, y) through OGR, the way the app's
+// editor will write, so the GeoPackage's index triggers run. Throws on failure.
+extern "C" JNIEXPORT void JNICALL
+Java_org_geocrew_nativelib_GeoCrewNative_movePoint(JNIEnv *env, jclass, jstring path, jstring layerName, jlong fid,
+                                                   jdouble x, jdouble y) {
+    if (!path || !layerName) {
+        throwIllegalArgument(env, "path or layer is null");
+        return;
+    }
+    const std::string p = toUtf8(env, path), l = toUtf8(env, layerName);
+    std::lock_guard<std::mutex> lock(gDatasetsLock);
+    CPLErrorReset();
+    GDALDataset *ds = dataset(p);
+    OGRLayer *layer = ds ? ds->GetLayerByName(l.c_str()) : nullptr;
+    OGRFeatureUniquePtr f(layer ? layer->GetFeature(fid) : nullptr);
+    if (!f) {
+        throwGdalError(env, "feature not found");
+        return;
+    }
+    OGRPoint point(x, y);
+    f->SetGeometry(&point);
+    if (layer->SetFeature(f.get()) != OGRERR_NONE) throwGdalError(env, "cannot save the feature");
+}
+
+// Closes every dataset opened by queryPoints or movePoint.
+extern "C" JNIEXPORT void JNICALL
+Java_org_geocrew_nativelib_GeoCrewNative_closeAll(JNIEnv *, jclass) {
+    std::lock_guard<std::mutex> lock(gDatasetsLock);
+    gDatasets.clear();
 }
