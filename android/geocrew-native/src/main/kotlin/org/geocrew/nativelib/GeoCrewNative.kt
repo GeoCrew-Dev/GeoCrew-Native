@@ -41,6 +41,6 @@ object GeoCrewNative {
     /** Moves point feature [fid] of [layer] in the GeoPackage at [path] to ([x], [y]). */
     @JvmStatic external fun movePoint(path: String, layer: String, fid: Long, x: Double, y: Double)
 
-    /** Closes the datasets opened by [queryPoints] and [movePoint]. */
+    /** Closes the datasets opened by [queryPoints] and [movePoint]; later calls to them fail. */
     @JvmStatic external fun closeAll()
 }

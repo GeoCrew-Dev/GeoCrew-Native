@@ -180,9 +180,11 @@ namespace {
 
 std::mutex gDatasetsLock;
 std::map<std::string, std::unique_ptr<GDALDataset>> gDatasets;
+bool gClosed = false;  // set by closeAll, so late tile queries do not reopen files
 
 // The open dataset for path, opened for update on first use. Call with gDatasetsLock held.
 GDALDataset *dataset(const std::string &path) {
+    if (gClosed) return nullptr;
     auto &ds = gDatasets[path];
     if (!ds) ds.reset(GDALDataset::Open(path.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE));
     return ds.get();
@@ -254,9 +256,10 @@ Java_org_geocrew_nativelib_GeoCrewNative_movePoint(JNIEnv *env, jclass, jstring 
     if (layer->SetFeature(f.get()) != OGRERR_NONE) throwGdalError(env, "cannot save the feature");
 }
 
-// Closes every dataset opened by queryPoints or movePoint.
+// Closes every dataset opened by queryPoints or movePoint; later calls fail.
 extern "C" JNIEXPORT void JNICALL
 Java_org_geocrew_nativelib_GeoCrewNative_closeAll(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(gDatasetsLock);
+    gClosed = true;
     gDatasets.clear();
 }

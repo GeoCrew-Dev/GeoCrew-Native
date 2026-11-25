@@ -108,7 +108,7 @@ jobs:
 
       - name: Build the AAR and the sample APKs
         working-directory: android
-        run: ./gradlew --no-daemon :geocrew-native:assembleRelease :sample:assembleRelease
+        run: ./gradlew --no-daemon :geocrew-native:assembleRelease :sample:assembleRelease :mapspike:assembleDebug
 
       - name: Report sizes
         run: |
