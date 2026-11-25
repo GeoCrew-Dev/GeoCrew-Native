@@ -47,9 +47,10 @@
 | 路径 | 内容 |
 | --- | --- |
 | `vcpkg.json`、`vcpkg-configuration.json` | 依赖清单；`builtin-baseline` 固定所有库的版本 |
-| `triplets/` | 安卓的 vcpkg 三元组（API 31、只编 Release、16 KB 对齐、LGPL 库编成 .so） |
+| `triplets/` | vcpkg 三元组：安卓（API 31、只编 Release、16 KB 对齐、LGPL 库编成 .so），以及服务端五个平台（静态库、只编 Release） |
 | `src/` | JNI 封装，编成 `libgeocrew_native.so` |
 | `bench/` | 在设备上跑的检查与测速程序，见 [bench/README.md](bench/README.md) |
+| `helper/` | 服务端的 GDAL 辅助程序 `geocrew-gdal-helper`：参数和 `gdal` 命令行一样，数据文件放在程序旁边的 `data/` |
 | `android/` | Gradle 工程：把编好的库打成 AAR（`geocrew-native`），以及量 APK 体积用的示例应用（`sample`） |
 | `scripts/` | 整理产物、检查许可证和 16 KB 对齐、在设备上跑测速 |
 
@@ -71,6 +72,13 @@ cd android && ./gradlew :geocrew-native:assembleRelease :sample:assembleRelease
 ```
 
 在 Windows 上也能编，GNU libiconv 由 vcpkg 自动下载 MSYS2 来编，configure 一步比较慢。
+
+服务端的辅助程序（预设：`x64-linux`、`arm64-linux`、`x64-osx`、`arm64-osx`、`x64-windows-static`）：
+
+```sh
+cmake --preset x64-linux && cmake --build --preset x64-linux
+scripts/check-helper.sh x64-linux     # 整理到 build/helper/x64-linux/，再跑一次转换核对
+```
 
 ## 发布
 

@@ -31,6 +31,59 @@
         "VCPKG_TARGET_TRIPLET": "x64-android",
         "ANDROID_ABI": "x86_64"
       }
+    },
+    {
+      "name": "desktop",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "x64-linux",
+      "inherits": "desktop",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "arm64-linux",
+      "inherits": "desktop",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-linux"
+      }
+    },
+    {
+      "name": "x64-osx",
+      "inherits": "desktop",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+      }
+    },
+    {
+      "name": "arm64-osx",
+      "inherits": "desktop",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+      }
+    },
+    {
+      "name": "x64-windows-static",
+      "displayName": "x64-windows-static (newest installed Visual Studio)",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "architecture": "x64",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded"
+      }
     }
   ],
   "buildPresets": [
@@ -41,6 +94,27 @@
     {
       "name": "x64-android",
       "configurePreset": "x64-android"
+    },
+    {
+      "name": "x64-linux",
+      "configurePreset": "x64-linux"
+    },
+    {
+      "name": "arm64-linux",
+      "configurePreset": "arm64-linux"
+    },
+    {
+      "name": "x64-osx",
+      "configurePreset": "x64-osx"
+    },
+    {
+      "name": "arm64-osx",
+      "configurePreset": "arm64-osx"
+    },
+    {
+      "name": "x64-windows-static",
+      "configurePreset": "x64-windows-static",
+      "configuration": "Release"
     }
   ]
 }
