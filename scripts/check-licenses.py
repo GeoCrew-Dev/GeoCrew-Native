@@ -22,6 +22,10 @@ import sys
 KNOWN = {
     "gdal": "MIT",
     "libiconv": "LGPL-2.1-or-later",
+    # Build tools only, never shipped. They land in the same tree when the target
+    # triplet is also the host triplet, as for the server helper on Linux and macOS.
+    "pkgconf": "ISC",
+    "vcpkg-make": "MIT",
 }
 
 GPL = re.compile(r"(?<!L)GPL")  # GPL and AGPL, not LGPL
