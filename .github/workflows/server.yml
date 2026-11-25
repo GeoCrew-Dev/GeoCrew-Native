@@ -1,0 +1,108 @@
+name: server
+
+# The server's GDAL helper (ADR 0013 in the main repository): one static build
+# per release platform, each run and checked on its own kind of machine.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with builtin-baseline in vcpkg.json.
+  VCPKG_COMMIT: 116475f57043d9f1208fa22bbb4cf3277392ebae
+
+jobs:
+  helper:
+    name: helper (${{ matrix.triplet }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { triplet: x64-linux, os: ubuntu-24.04 }
+          - { triplet: arm64-linux, os: ubuntu-24.04-arm }
+          - { triplet: x64-osx, os: macos-15-intel }
+          - { triplet: arm64-osx, os: macos-15 }
+          - { triplet: x64-windows-static, os: windows-2025 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch vcpkg
+        run: |
+          git clone --quiet --filter=blob:none https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" checkout --quiet "$VCPKG_COMMIT"
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          mkdir -p ~/.cache/vcpkg-archives
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$HOME/.cache/vcpkg-archives" >> "$GITHUB_ENV"
+
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics'
+
+      - name: Bootstrap vcpkg and install Ninja
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build > /dev/null
+          else
+            command -v ninja > /dev/null || brew install ninja
+          fi
+          # vcpkg ships no tools for arm64 Linux, so it must use the system's cmake and ninja.
+          [ "$RUNNER_ARCH" = ARM64 ] && [ "$RUNNER_OS" = Linux ] && echo "VCPKG_FORCE_SYSTEM_BINARIES=1" >> "$GITHUB_ENV"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Restore built packages
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/vcpkg-archives
+          key: vcpkg-${{ matrix.triplet }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**') }}
+          restore-keys: vcpkg-${{ matrix.triplet }}-
+
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.triplet }}
+          cmake --build --preset ${{ matrix.triplet }}
+
+      - name: Save built packages
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/vcpkg-archives
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Check licenses
+        run: |
+          python=$(command -v python3 || command -v python)
+          "$python" scripts/check-licenses.py --allow-static-lgpl build/${{ matrix.triplet }}/vcpkg_installed ${{ matrix.triplet }}
+
+      - name: Stage and run the helper
+        run: scripts/check-helper.sh ${{ matrix.triplet }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdal-helper-${{ matrix.triplet }}
+          path: build/helper/${{ matrix.triplet }}/
+          if-no-files-found: error
+
+      - name: Keep the build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.triplet }}
+          path: |
+            ${{ env.VCPKG_ROOT }}/buildtrees/*/*.log
+            build/${{ matrix.triplet }}/vcpkg-manifest-install.log
+          if-no-files-found: ignore
