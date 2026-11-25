@@ -11,6 +11,8 @@
 - **安卓的库必须按 16 KB 页对齐**，`scripts/check-android-libs.sh` 检查。
 - **README 只写验证过的事**，只在模拟器上跑过的标"实验"。
 - **流程**：开 PR，PR 由 AI 评审，CI 通过后合并。提交信息用英文 Conventional Commits，文档用中文。
+  - main 受保护：必须走 PR，`native (arm64-android)`、`native (x64-android)`、`aar` 三个检查必须通过。
+  - 评审改完后用 `gh pr merge <N> --auto --rebase` 打开自动合并：CI 一通过就按 rebase 合并，保留每个提交。
 - **不提交**密钥和本机特有的设置（代理地址、`local.properties` 等）。
 
 ## 怎么构建和测试

@@ -17,3 +17,7 @@ target_link_options(geocrew_native PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-secti
 # Benchmark run on a device through adb, see bench/README.md.
 add_executable(geocrew_bench bench/geocrew_bench.cpp)
 target_link_libraries(geocrew_bench PRIVATE GDAL::GDAL PROJ::proj GEOS::geos_c)
+
+# GeoPackage speed and crash recovery in given directories, see bench/README.md.
+add_executable(geocrew_storage bench/geocrew_storage.cpp)
+target_link_libraries(geocrew_storage PRIVATE GDAL::GDAL)
