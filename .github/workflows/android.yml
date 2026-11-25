@@ -1,0 +1,115 @@
+name: android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Keep in step with builtin-baseline in vcpkg.json.
+  VCPKG_COMMIT: 116475f57043d9f1208fa22bbb4cf3277392ebae
+  NDK_VERSION: 27.3.13750724
+
+jobs:
+  native:
+    name: native (${{ matrix.triplet }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        triplet: [arm64-android, x64-android]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the NDK, vcpkg and Ninja
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          git clone --quiet --filter=blob:none https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" checkout --quiet "$VCPKG_COMMIT"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          mkdir -p ~/.cache/vcpkg-archives
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$HOME/.cache/vcpkg-archives" >> "$GITHUB_ENV"
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
+
+      - name: Restore built packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg-archives
+          key: vcpkg-${{ matrix.triplet }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**') }}
+          restore-keys: vcpkg-${{ matrix.triplet }}-
+
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.triplet }}
+          cmake --build --preset ${{ matrix.triplet }}
+
+      - name: Check licenses
+        run: python3 scripts/check-licenses.py build/${{ matrix.triplet }}/vcpkg_installed ${{ matrix.triplet }}
+
+      - name: Stage and check the libraries
+        run: |
+          scripts/stage-android.sh ${{ matrix.triplet }}
+          scripts/check-android-libs.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.triplet }}
+          path: |
+            build/android/
+            build/${{ matrix.triplet }}/geocrew_bench
+          if-no-files-found: error
+
+      - name: Keep the build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.triplet }}
+          path: |
+            ${{ env.VCPKG_ROOT }}/buildtrees/*/*.log
+            build/${{ matrix.triplet }}/vcpkg-manifest-install.log
+          if-no-files-found: ignore
+
+  aar:
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: build
+          merge-multiple: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build the AAR and the sample APKs
+        working-directory: android
+        run: ./gradlew --no-daemon :geocrew-native:assembleRelease :sample:assembleRelease
+
+      - name: Report sizes
+        run: |
+          {
+            echo "| File | Size (MB) |"
+            echo "|---|---:|"
+            for f in android/geocrew-native/build/outputs/aar/*.aar android/sample/build/outputs/apk/release/*.apk; do
+              echo "| $(basename "$f") | $(awk -v b="$(wc -c < "$f")" 'BEGIN { printf "%.1f", b / 1048576 }') |"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geocrew-native-android
+          path: |
+            android/geocrew-native/build/outputs/aar/*.aar
+            android/sample/build/outputs/apk/release/*.apk
+          if-no-files-found: error
