@@ -57,7 +57,8 @@ class MainActivity : Activity() {
         }
         setContentView(FrameLayout(this).apply {
             addView(mapView)
-            addView(status)
+            // Only as tall as its text, so it does not wash out the whole map.
+            addView(status, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         })
         mapView.onCreate(savedInstanceState)
         Thread {
