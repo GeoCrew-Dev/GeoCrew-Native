@@ -15,7 +15,7 @@ build=build/$triplet
 staged=build/android
 [ -d "$staged/jniLibs/$abi" ] || { echo "run scripts/stage-android.sh $triplet first" >&2; exit 2; }
 ndk=${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}
-ndk=${ndk//\//}
+ndk=$(printf '%s' "$ndk" | tr '\\' /) # Windows paths use backslashes
 strip=$(ls "$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-strip* | head -n 1)
 "$strip" --strip-unneeded -o "$build/geocrew_bench.stripped" "$build/geocrew_bench"
 dir=/data/local/tmp/geocrew-bench

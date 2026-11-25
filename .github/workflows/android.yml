@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# A new push to the same branch cancels the run still going for the old one.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # Keep in step with builtin-baseline in vcpkg.json.
   VCPKG_COMMIT: 116475f57043d9f1208fa22bbb4cf3277392ebae
@@ -38,7 +43,8 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build > /dev/null
 
       - name: Restore built packages
-        uses: actions/cache@v4
+        id: cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/vcpkg-archives
           key: vcpkg-${{ matrix.triplet }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'triplets/**') }}
@@ -48,6 +54,14 @@ jobs:
         run: |
           cmake --preset ${{ matrix.triplet }}
           cmake --build --preset ${{ matrix.triplet }}
+
+      # Saved right after the build, so a failure in a later step does not throw it away.
+      - name: Save built packages
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/vcpkg-archives
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Check licenses
         run: python3 scripts/check-licenses.py build/${{ matrix.triplet }}/vcpkg_installed ${{ matrix.triplet }}
