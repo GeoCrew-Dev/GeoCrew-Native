@@ -14,8 +14,10 @@
 #include <cpl_string.h>
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <gdal_utils.h>
 #include <gdalalgorithm.h>
 #include <geos_c.h>
+#include <ogr_spatialref.h>
 #include <ogr_srs_api.h>
 #include <ogrsf_frmts.h>
 #include <proj.h>
@@ -262,4 +264,162 @@ Java_org_geocrew_nativelib_GeoCrewNative_closeAll(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(gDatasetsLock);
     gClosed = true;
     gDatasets.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Raster spike (M1): rasters in any CRS drawn by MapLibre. Each Web Mercator
+// tile is warped from the source on request and encoded as PNG.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr double kMercatorOrigin = 20037508.342789244;
+constexpr int kTileSize = 256;
+
+struct Raster {
+    std::unique_ptr<GDALDataset> ds;
+    OGREnvelope footprint;  // the raster's extent in EPSG:3857
+};
+
+std::mutex gRastersLock;
+std::map<std::string, Raster> gRasters;
+
+// The open raster for path with its Web Mercator footprint. Call with gRastersLock held.
+Raster *raster(const std::string &path) {
+    Raster &r = gRasters[path];
+    if (r.ds) return &r;
+    r.ds.reset(GDALDataset::Open(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
+    if (!r.ds) return nullptr;
+    double gt[6];
+    const OGRSpatialReference *srs = r.ds->GetSpatialRef();
+    if (r.ds->GetGeoTransform(gt) != CE_None || !srs) return nullptr;
+    OGRSpatialReference mercator;
+    mercator.importFromEPSG(3857);
+    mercator.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    std::unique_ptr<OGRCoordinateTransformation> ct(OGRCreateCoordinateTransformation(srs, &mercator));
+    if (!ct) return nullptr;
+    // Edges sampled every 1/16 of the side, since straight edges curve after reprojection.
+    const double w = r.ds->GetRasterXSize(), h = r.ds->GetRasterYSize();
+    for (int i = 0; i <= 16; i++) {
+        const double pixels[4][2] = {{w * i / 16, 0}, {w * i / 16, h}, {0, h * i / 16}, {w, h * i / 16}};
+        for (const auto &px : pixels) {
+            double x = gt[0] + px[0] * gt[1] + px[1] * gt[2];
+            double y = gt[3] + px[0] * gt[4] + px[1] * gt[5];
+            if (ct->Transform(1, &x, &y)) r.footprint.Merge(x, y);
+        }
+    }
+    return &r;
+}
+
+}  // namespace
+
+// Renders Web Mercator tile z/x/y (XYZ scheme, 256 px) of the raster at path,
+// warping from the raster's own CRS, and returns it as PNG with transparency
+// where the raster does not reach; an empty array for a tile outside it.
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_org_geocrew_nativelib_GeoCrewNative_renderTile(JNIEnv *env, jclass, jstring path, jint z, jint x, jint y) {
+    if (!path) {
+        throwIllegalArgument(env, "path is null");
+        return nullptr;
+    }
+    const std::string p = toUtf8(env, path);
+    const double span = 2 * kMercatorOrigin / static_cast<double>(1LL << z);
+    const double minX = -kMercatorOrigin + x * span, maxY = kMercatorOrigin - y * span;
+    std::vector<GByte> png;
+    {
+        std::lock_guard<std::mutex> lock(gRastersLock);
+        CPLErrorReset();
+        Raster *r = raster(p);
+        if (!r) {
+            throwGdalError(env, "cannot open the raster");
+            return nullptr;
+        }
+        OGREnvelope tile;
+        tile.MinX = minX;
+        tile.MaxX = minX + span;
+        tile.MinY = maxY - span;
+        tile.MaxY = maxY;
+        if (tile.Intersects(r->footprint)) {
+            const int bands = r->ds->GetRasterCount() >= 3 ? 3 : 1;
+            GDALDriver *mem = GetGDALDriverManager()->GetDriverByName("MEM");
+            std::unique_ptr<GDALDataset> dst(mem->Create("", kTileSize, kTileSize, bands + 1, GDT_Byte, nullptr));
+            double gt[6] = {minX, span / kTileSize, 0, maxY, 0, -span / kTileSize};
+            dst->SetGeoTransform(gt);
+            OGRSpatialReference mercator;
+            mercator.importFromEPSG(3857);
+            dst->SetSpatialRef(&mercator);
+            CPLStringList args;
+            for (const char *a : {"-r", "bilinear", "-dstalpha"}) args.AddString(a);
+            for (int b = 1; b <= bands; b++) {
+                args.AddString("-b");
+                args.AddString(CPLSPrintf("%d", b));
+            }
+            GDALWarpAppOptions *options = GDALWarpAppOptionsNew(args.List(), nullptr);
+            GDALDatasetH src = GDALDataset::ToHandle(r->ds.get());
+            int usageError = 0;
+            GDALDatasetH warped = GDALWarp(nullptr, GDALDataset::ToHandle(dst.get()), 1, &src, options, &usageError);
+            GDALWarpAppOptionsFree(options);
+            if (!warped) {
+                throwGdalError(env, "warp failed");
+                return nullptr;
+            }
+            const char *name = "/vsimem/geocrew_tile.png";
+            GDALDriver *pngDriver = GetGDALDriverManager()->GetDriverByName("PNG");
+            std::unique_ptr<GDALDataset> out(pngDriver->CreateCopy(name, dst.get(), FALSE, nullptr, nullptr, nullptr));
+            out.reset();
+            vsi_l_offset size = 0;
+            GByte *data = VSIGetMemFileBuffer(name, &size, FALSE);
+            if (data) png.assign(data, data + size);
+            VSIUnlink(name);
+            if (png.empty()) {
+                throwGdalError(env, "PNG encoding failed");
+                return nullptr;
+            }
+        }
+    }
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(png.size()));
+    env->SetByteArrayRegion(out, 0, static_cast<jsize>(png.size()), reinterpret_cast<const jbyte *>(png.data()));
+    return out;
+}
+
+// Writes a 40 km x 40 km RGB GeoTIFF in CGCS2000 / 3-degree Gauss-Kruger CM 114E
+// (EPSG:4547) around 114E 30N, 10 m pixels: colour gradients with a black line
+// every kilometre, so misplaced or distorted tiles are easy to see.
+extern "C" JNIEXPORT void JNICALL
+Java_org_geocrew_nativelib_GeoCrewNative_makeTestRaster(JNIEnv *env, jclass, jstring path) {
+    if (!path) {
+        throwIllegalArgument(env, "path is null");
+        return;
+    }
+    const std::string p = toUtf8(env, path);
+    constexpr int kSize = 4000;
+    CPLStringList options;
+    options.SetNameValue("COMPRESS", "DEFLATE");
+    options.SetNameValue("TILED", "YES");
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName("GTiff");
+    std::unique_ptr<GDALDataset> ds(driver->Create(p.c_str(), kSize, kSize, 3, GDT_Byte, options.List()));
+    if (!ds) {
+        throwGdalError(env, "cannot create the raster");
+        return;
+    }
+    double gt[6] = {480000.0, 10.0, 0, 3340000.0, 0, -10.0};
+    ds->SetGeoTransform(gt);
+    OGRSpatialReference srs;
+    srs.importFromEPSG(4547);
+    ds->SetSpatialRef(&srs);
+    std::vector<GByte> row(kSize);
+    for (int b = 1; b <= 3; b++) {
+        GDALRasterBand *band = ds->GetRasterBand(b);
+        for (int j = 0; j < kSize; j++) {
+            for (int i = 0; i < kSize; i++) {
+                const bool line = i % 100 == 0 || j % 100 == 0;
+                const int value = b == 1 ? i * 255 / kSize : b == 2 ? j * 255 / kSize : 160;
+                row[i] = static_cast<GByte>(line ? 0 : value);
+            }
+            if (band->RasterIO(GF_Write, 0, j, kSize, 1, row.data(), kSize, 1, GDT_Byte, 0, 0) != CE_None) {
+                throwGdalError(env, "cannot write the raster");
+                return;
+            }
+        }
+    }
 }

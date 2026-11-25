@@ -43,4 +43,16 @@ object GeoCrewNative {
 
     /** Closes the datasets opened by [queryPoints] and [movePoint]; later calls to them fail. */
     @JvmStatic external fun closeAll()
+
+    // Raster spike (M1): rasters in any CRS warped to Web Mercator tiles on request.
+
+    /**
+     * Renders Web Mercator tile [z]/[x]/[y] (XYZ, 256 px) of the raster at [path]
+     * as PNG, warped from the raster's own CRS; an empty array for a tile the
+     * raster does not reach.
+     */
+    @JvmStatic external fun renderTile(path: String, z: Int, x: Int, y: Int): ByteArray
+
+    /** Writes a 40 km test GeoTIFF in EPSG:4547 around 114E 30N, with a line every kilometre. */
+    @JvmStatic external fun makeTestRaster(path: String)
 }
