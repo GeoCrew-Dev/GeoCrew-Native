@@ -4,11 +4,13 @@
 - No GPL: a package fails when every way of taking its license includes the
   GPL. LGPL is fine, and for "A OR B" one acceptable choice is enough.
 - LGPL packages must be shared libraries (no static archives), so users can
-  replace them; see docs/licenses.md in the main GeoCrew repository.
+  replace them; see docs/licenses.md in the main GeoCrew repository. The
+  server's helper may link them statically (--allow-static-lgpl): the project
+  is fully open source, so users can relink it.
 - A package without a license in its vcpkg metadata fails until it is
   reviewed and added to KNOWN below.
 
-Usage: scripts/check-licenses.py <vcpkg_installed dir> <triplet>
+Usage: scripts/check-licenses.py [--allow-static-lgpl] <vcpkg_installed dir> <triplet>
 """
 import json
 import pathlib
@@ -72,7 +74,7 @@ def choices(expression):
     return disjunction()
 
 
-def main(installed, triplet):
+def main(installed, triplet, allow_static_lgpl=False):
     root = pathlib.Path(installed)
     failures = []
     found = sorted(root.glob(f"{triplet}/share/*/vcpkg.spdx.json"))
@@ -84,8 +86,9 @@ def main(installed, triplet):
         doc = json.loads(spdx.read_text(encoding="utf-8"))
         package = next(p for p in doc["packages"] if p.get("SPDXID") == "SPDXRef-port")
         license = package.get("licenseConcluded", "NOASSERTION")
-        if license == "NOASSERTION":
-            license = KNOWN.get(port, license)
+        # vcpkg writes LicenseRef-vcpkg-null for a port whose manifest has no license.
+        if license in ("NOASSERTION", "LicenseRef-vcpkg-null"):
+            license = KNOWN.get(port, "NOASSERTION")
         note = ""
         acceptable = [c for c in choices(license) if not any(GPL.search(l) for l in c)]
         if license == "NOASSERTION":
@@ -98,12 +101,14 @@ def main(installed, triplet):
             files = []
             for info in root.glob(f"vcpkg/info/{port}_*_{triplet}.list"):
                 files += info.read_text(encoding="utf-8").split()
-            static = [f for f in files if f.endswith(".a")]
-            if static:
+            # Windows static libraries are .lib too, but so are import libraries of DLLs.
+            has_dll = any(f.endswith(".dll") for f in files)
+            static = [f for f in files if f.endswith(".a") or (f.endswith(".lib") and not has_dll)]
+            if static and not allow_static_lgpl:
                 failures.append(f"{port}: LGPL but built as a static library ({', '.join(static)})")
                 note = "  <- LGPL built static"
             else:
-                note = "  (LGPL, shared library)"
+                note = "  (LGPL, static: allowed for the server helper)" if static else "  (LGPL, shared library)"
         print(f"{port:24} {license}{note}")
     if failures:
         print("\n".join(failures), file=sys.stderr)
@@ -112,6 +117,9 @@ def main(installed, triplet):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    allow = "--allow-static-lgpl" in args
+    args = [a for a in args if a != "--allow-static-lgpl"]
+    if len(args) != 2:
         sys.exit(__doc__)
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    sys.exit(main(args[0], args[1], allow))
