@@ -1,0 +1,7 @@
+/build/
+/vcpkg_installed/
+/android/.gradle/
+/android/build/
+/android/*/build/
+/android/local.properties
+__pycache__/
