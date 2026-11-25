@@ -196,7 +196,7 @@ class MainActivity : Activity() {
                 val settled = stats.tilesDone() > before && now - stats.lastTileDoneAt() >= 150
                 if (settled || now - t0 > 5000) {
                     if (!settled) log("round $round: no tile was queried again within 5 s")
-                    totals += stats.lastTileDoneAt() - t0
+                    totals += if (settled) stats.lastTileDoneAt() - t0 else now - t0
                     editRound(round + 1, x, y, writes, totals)
                 } else {
                     mapView.postDelayed(this, 10)
