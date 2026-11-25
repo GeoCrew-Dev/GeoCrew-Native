@@ -284,10 +284,19 @@ struct Raster {
 std::mutex gRastersLock;
 std::map<std::string, Raster> gRasters;
 
-// The open raster for path with its Web Mercator footprint. Call with gRastersLock held.
+// The open raster for path with its Web Mercator footprint, or nullptr (and no
+// cache entry) when it cannot be used. Call with gRastersLock held.
+Raster *openRaster(const std::string &path, Raster &r);
+
 Raster *raster(const std::string &path) {
-    Raster &r = gRasters[path];
-    if (r.ds) return &r;
+    auto it = gRasters.find(path);
+    if (it != gRasters.end()) return &it->second;
+    Raster r;
+    if (!openRaster(path, r)) return nullptr;
+    return &gRasters.emplace(path, std::move(r)).first->second;
+}
+
+Raster *openRaster(const std::string &path, Raster &r) {
     r.ds.reset(GDALDataset::Open(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
     if (!r.ds) return nullptr;
     double gt[6];
@@ -340,7 +349,9 @@ Java_org_geocrew_nativelib_GeoCrewNative_renderTile(JNIEnv *env, jclass, jstring
         tile.MinY = maxY - span;
         tile.MaxY = maxY;
         if (tile.Intersects(r->footprint)) {
-            const int bands = r->ds->GetRasterCount() >= 3 ? 3 : 1;
+            const int count = r->ds->GetRasterCount();
+            const bool srcAlpha = r->ds->GetRasterBand(count)->GetColorInterpretation() == GCI_AlphaBand;
+            const int bands = count - (srcAlpha ? 1 : 0) >= 3 ? 3 : 1;
             GDALDriver *mem = GetGDALDriverManager()->GetDriverByName("MEM");
             std::unique_ptr<GDALDataset> dst(mem->Create("", kTileSize, kTileSize, bands + 1, GDT_Byte, nullptr));
             double gt[6] = {minX, span / kTileSize, 0, maxY, 0, -span / kTileSize};
@@ -350,6 +361,7 @@ Java_org_geocrew_nativelib_GeoCrewNative_renderTile(JNIEnv *env, jclass, jstring
             dst->SetSpatialRef(&mercator);
             CPLStringList args;
             for (const char *a : {"-r", "bilinear", "-dstalpha"}) args.AddString(a);
+            if (srcAlpha) args.AddString("-srcalpha");  // carry the source's own transparency
             for (int b = 1; b <= bands; b++) {
                 args.AddString("-b");
                 args.AddString(CPLSPrintf("%d", b));

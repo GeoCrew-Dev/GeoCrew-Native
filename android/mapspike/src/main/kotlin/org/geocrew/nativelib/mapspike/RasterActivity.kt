@@ -46,12 +46,21 @@ class RasterActivity : Activity() {
         HttpRequestUtil.setOkHttpClient(OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()
             if (request.url.host != TILE_HOST) return@addInterceptor chain.proceed(request)
-            val (z, x, y) = request.url.pathSegments.let { listOf(it[0], it[1], it[2].substringBefore('.')) }.map { it.toInt() }
+            // Anything thrown here other than an IOException would kill OkHttp's thread, so answer 500 instead.
+            val tile = runCatching {
+                request.url.pathSegments.let { listOf(it[0], it[1], it[2].substringBefore('.')) }.map { it.toInt() }
+            }.getOrNull()
+            if (tile == null) return@addInterceptor failure(request, "bad tile path ${request.url}")
+            val (z, x, y) = tile
             // renderTile serialises on one lock inside; taking it here first keeps
             // the time spent waiting for other tiles out of the measurement.
             val png = synchronized(renderLock) {
                 val t0 = SystemClock.elapsedRealtimeNanos()
-                val bytes = GeoCrewNative.renderTile(tiff.path, z, x, y)
+                val bytes = try {
+                    GeoCrewNative.renderTile(tiff.path, z, x, y)
+                } catch (e: RuntimeException) {
+                    return@addInterceptor failure(request, "tile $z/$x/$y: ${e.message}")
+                }
                 val ms = (SystemClock.elapsedRealtimeNanos() - t0) / 1e6
                 synchronized(lock) { if (bytes.isEmpty()) emptyTiles++ else tileMs += ms }
                 bytes
@@ -76,6 +85,12 @@ class RasterActivity : Activity() {
             prepare()
             runOnUiThread { mapView.getMapAsync(::start) }
         }.start()
+    }
+
+    private fun failure(request: okhttp3.Request, message: String): Response {
+        Log.w(TAG, message)
+        return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(500).message(message)
+            .body(ByteArray(0).toResponseBody(null)).build()
     }
 
     private fun prepare() {
