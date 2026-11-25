@@ -9,10 +9,15 @@
 // --version prints the library versions. PROJ's and GDAL's data files are read
 // from the "data" directory next to the executable, unless PROJ_DATA or
 // GDAL_DATA is set. Exit status: 0 done, 1 the algorithm failed, 2 bad arguments.
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
@@ -23,9 +28,20 @@
 #include <ogr_srs_api.h>
 #include <proj.h>
 
+// The path of this executable. GDAL's CPLGetExecPath covers Windows and Linux only.
+static bool execPath(char *out, int size) {
+#ifdef __APPLE__
+    char raw[PATH_MAX];
+    uint32_t n = sizeof raw;
+    return _NSGetExecutablePath(raw, &n) == 0 && realpath(raw, out) != nullptr && size >= PATH_MAX;
+#else
+    return CPLGetExecPath(out, size);
+#endif
+}
+
 int main(int argc, char **argv) {
-    char exe[4096];
-    if (CPLGetExecPath(exe, sizeof exe)) {
+    char exe[PATH_MAX > 4096 ? PATH_MAX : 4096];
+    if (execPath(exe, sizeof exe)) {
         const std::string data = CPLFormFilenameSafe(CPLGetDirnameSafe(exe).c_str(), "data", nullptr);
         if (!std::getenv("PROJ_DATA")) {
             const char *const paths[] = {data.c_str(), nullptr};
@@ -56,7 +72,11 @@ int main(int argc, char **argv) {
         GDALAlgorithmH alg = GDALAlgorithmGetActualAlgorithm(root);
         if (GDALAlgorithmRun(alg, nullptr, nullptr) && GDALAlgorithmFinalize(alg)) {
             if (GDALAlgorithmArgH arg = GDALAlgorithmGetArg(alg, "output-string")) {
-                std::fputs(GDALAlgorithmArgGetAsString(arg), stdout);
+                const char *out = GDALAlgorithmArgGetAsString(arg);
+                std::fputs(out, stdout);
+                if (*out && out[std::strlen(out) - 1] != '
+') std::fputc('
+', stdout);
                 GDALAlgorithmArgRelease(arg);
             }
         } else {
