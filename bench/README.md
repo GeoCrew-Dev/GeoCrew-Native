@@ -25,6 +25,8 @@ scripts/run-bench.sh x64-android
 
 模拟器跑在电脑的 CPU 上，测出的时间只能看相对快慢；手机上的真实速度要用 arm64 真机测。
 
+CI 的 `emulator (API 31)` 任务在 API 31 的 x86_64 模拟器上跑测速程序、存储测试（私有目录和 /sdcard）和 AAR 的仪器测试，见 `scripts/ci-device-tests.sh`。
+
 # geocrew_storage
 
 测 GeoPackage 放在不同位置时的速度和崩溃恢复，用来决定工程文件放在哪里：/sdcard（经过 FUSE）、应用私有目录、外置存储卡。每个目录分别用 SQLite 的 DELETE 和 WAL 两种日志模式测：
