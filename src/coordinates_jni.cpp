@@ -23,7 +23,9 @@ namespace {
 
 std::mutex gLock;
 
-// A transformation is costly to set up and cheap to run: one per pair of CRSs, kept.
+// A transformation is costly to set up and cheap to run: one per pair of CRSs,
+// kept; past kMaxKept pairs (users typing their own WKT, say) the cache starts over.
+constexpr size_t kMaxKept = 64;
 std::map<std::pair<std::string, std::string>, std::unique_ptr<OGRCoordinateTransformation>> gTransforms;
 
 // The CRS named by text as GDAL reads user input (EPSG:4549, WKT, PROJ strings;
@@ -56,6 +58,7 @@ Java_org_geocrew_nativelib_Coordinates_transform(JNIEnv *env, jclass, jstring fr
     if (it == gTransforms.end()) {
         OGRSpatialReference a, b;
         if (!readSrs(env, key.first, a) || !readSrs(env, key.second, b)) return nullptr;
+        if (gTransforms.size() >= kMaxKept) gTransforms.clear();
         std::unique_ptr<OGRCoordinateTransformation> t(OGRCreateCoordinateTransformation(&a, &b));
         if (!t) {
             throwIllegalArgument(env, ("no transformation from " + key.first + " to " + key.second).c_str());
@@ -67,6 +70,7 @@ Java_org_geocrew_nativelib_Coordinates_transform(JNIEnv *env, jclass, jstring fr
     std::vector<double> x(count), y(count);
     std::vector<int> ok(count, FALSE);
     jdouble *in = env->GetDoubleArrayElements(xy, nullptr);
+    if (!in) return nullptr;  // OutOfMemoryError pending
     for (size_t i = 0; i < count; i++) {
         x[i] = in[2 * i];
         y[i] = in[2 * i + 1];
