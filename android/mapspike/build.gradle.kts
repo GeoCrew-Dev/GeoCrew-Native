@@ -33,7 +33,9 @@ dependencies {
     implementation(project(":geocrew-native"))
     // The default android-sdk renders with Vulkan, which crashed on the emulator (null
     // pointer in the render thread while animating the camera); OpenGL ES works there.
-    implementation("org.maplibre.gl:android-sdk-opengl:13.7.1")
+    // Build with -PmapBackend=vulkan to try Vulkan on a phone.
+    val vulkan = providers.gradleProperty("mapBackend").orNull == "vulkan"
+    implementation(if (vulkan) "org.maplibre.gl:android-sdk:13.7.1" else "org.maplibre.gl:android-sdk-opengl:13.7.1")
     // RasterActivity answers MapLibre's tile requests with an OkHttp interceptor.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
