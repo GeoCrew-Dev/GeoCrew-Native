@@ -134,6 +134,9 @@ class VectorDatasetTest {
         assertThrows(IllegalArgumentException::class.java) { ds.add("points", """{"properties": {"colour": "red"}}""") }
         assertThrows(IllegalArgumentException::class.java) { ds.add("points", """{"geometry": {"type": "Blob"}}""") }
         assertThrows(IllegalArgumentException::class.java) { ds.add("points", "not json") }
+        for (bad in listOf(""""dip": "45a"""", """"n": 1.5""", """"rock": true""", """"day": 3""", """"ok": 1e10""")) {
+            assertThrows(bad, IllegalArgumentException::class.java) { ds.add("points", """{"properties": {$bad}}""") }
+        }
         assertThrows(IllegalArgumentException::class.java) { ds.add("nowhere", "{}") }
         assertThrows(IllegalArgumentException::class.java) { ds.createLayer("x", "POINT", null, """[{"name": "a", "type": "blob"}]""") }
         assertThrows(IllegalArgumentException::class.java) { VectorDataset.create(path.path) }

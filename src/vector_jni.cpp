@@ -4,6 +4,7 @@
 // in the layer's own CRS. Numbers are written so that they read back exactly.
 #include <jni.h>
 
+#include <climits>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -165,6 +166,46 @@ void featureJson(std::string &out, OGRFeature *f) {
 
 // ----- JSON in -----
 
+// Sets field i of f to a JSON value of a fitting type: OGR itself would turn
+// "45a" into 0 for a number field, or 1.5 into 1 for an integer one. Returns
+// why not, starting with a space, or "".
+std::string setValue(OGRFeature *f, int i, const CPLJSONObject &v) {
+    const OGRFieldType type = f->GetFieldDefnRef(i)->GetType();
+    const bool integer = type == OFTInteger || type == OFTInteger64, numeric = integer || type == OFTReal;
+    switch (v.GetType()) {
+        case CPLJSONObject::Type::Null: f->SetFieldNull(i); return "";
+        case CPLJSONObject::Type::Boolean:
+            if (type != OFTInteger) return " does not take true or false";
+            f->SetField(i, v.ToBool() ? 1 : 0);
+            return "";
+        case CPLJSONObject::Type::Integer:
+        case CPLJSONObject::Type::Long: {
+            if (!numeric && type != OFTString) return " does not take a number";
+            const GIntBig n = v.ToLong();
+            if (type == OFTInteger && (n < INT_MIN || n > INT_MAX)) return " is a 32-bit integer";
+            f->SetField(i, n);
+            return "";
+        }
+        case CPLJSONObject::Type::Double: {
+            if (!numeric && type != OFTString) return " does not take a number";
+            const double d = v.ToDouble();
+            if (integer) {
+                const double limit = type == OFTInteger ? 2147483648.0 : 9223372036854775808.0;
+                if (d != std::floor(d) || d < -limit || d >= limit) return " takes whole numbers in its range";
+                f->SetField(i, static_cast<GIntBig>(d));
+            } else {
+                f->SetField(i, d);
+            }
+            return "";
+        }
+        case CPLJSONObject::Type::String:
+            if (numeric) return " takes a number, not a string";
+            f->SetField(i, v.ToString().c_str());
+            return "";
+        default: return " must be a string, number, boolean or null";
+    }
+}
+
 // Sets f's geometry and properties from {"geometry": ..., "properties": {...}};
 // what the JSON leaves out stays as it is. Returns why not, or "".
 std::string fill(OGRFeature *f, const std::string &text) {
@@ -188,15 +229,8 @@ std::string fill(OGRFeature *f, const std::string &text) {
                 const std::string name = p.GetName();
                 const int i = f->GetFieldIndex(name.c_str());
                 if (i < 0) return "there is no field " + name;
-                switch (p.GetType()) {
-                    case CPLJSONObject::Type::Null: f->SetFieldNull(i); break;
-                    case CPLJSONObject::Type::Boolean: f->SetField(i, p.ToBool() ? 1 : 0); break;
-                    case CPLJSONObject::Type::Integer:
-                    case CPLJSONObject::Type::Long: f->SetField(i, static_cast<GIntBig>(p.ToLong())); break;
-                    case CPLJSONObject::Type::Double: f->SetField(i, p.ToDouble()); break;
-                    case CPLJSONObject::Type::String: f->SetField(i, p.ToString().c_str()); break;
-                    default: return "field " + name + " must be a string, number, boolean or null";
-                }
+                const std::string why = setValue(f, i, p);
+                if (!why.empty()) return "field " + name + why;
             }
         } else if (key != "fid" && key != "type") {
             return "unknown member " + key;
@@ -405,6 +439,9 @@ extern "C" JNIEXPORT void JNICALL VECTOR(createLayer)(JNIEnv *env, jclass, jlong
     for (OGRFieldDefn &d : defs) {
         if (l->CreateField(&d) != OGRERR_NONE) {
             throwGdalError(env, (std::string("cannot create field ") + d.GetNameRef()).c_str());
+            for (int i = 0; i < ds->GetLayerCount(); i++) {
+                if (ds->GetLayer(i) == l) ds->DeleteLayer(i);  // not half a layer
+            }
             return;
         }
     }
