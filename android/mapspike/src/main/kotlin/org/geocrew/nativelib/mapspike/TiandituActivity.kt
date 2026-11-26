@@ -57,7 +57,6 @@ class TiandituActivity : Activity() {
     private val renderLock = Any()
     private val fetchMs = mutableListOf<Double>()
     private val warpMs = mutableListOf<Double>()
-    private var fetched = 0
     private var cached = 0
     private var failed = 0
     private val net = OkHttpClient()
@@ -65,6 +64,8 @@ class TiandituActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
+        // MapLibre logs the URL of cancelled and failed requests, and Tianditu's carry the key.
+        org.maplibre.android.module.http.HttpRequestUtil.setLogEnabled(false)
         val mode = intent.getStringExtra("mode") ?: "w"
         mapView = MapView(this)
         status = TextView(this).apply {
@@ -146,9 +147,9 @@ class TiandituActivity : Activity() {
         }
         val base = File(tileDir, "m_${z}_${x}_$y")
         val png = File("$base.png")
-        png.outputStream().use { mosaic.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        writeAtomically(png) { file -> file.outputStream().use { mosaic.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         val vrt = File("$base.vrt")
-        vrt.writeText(vrtXml(png.name, cols * 256, rows * 256, -180 + col0 * span, 90 - row0 * span, span / 256))
+        writeAtomically(vrt) { it.writeText(vrtXml(png.name, cols * 256, rows * 256, -180 + col0 * span, 90 - row0 * span, span / 256)) }
         return synchronized(renderLock) {
             val t0 = SystemClock.elapsedRealtimeNanos()
             val out = GeoCrewNative.renderTile(vrt.path, z, x, y)
@@ -176,11 +177,24 @@ class TiandituActivity : Activity() {
                 throw IOException("Tianditu answered ${response.code} $type for $level/$row/$col")
             }
             synchronized(lock) {
-                fetched++
                 fetchMs += (SystemClock.elapsedRealtimeNanos() - t0) / 1e6
             }
-            file.writeBytes(body)
+            writeAtomically(file) { it.writeBytes(body) }
             return body
+        }
+    }
+
+    /**
+     * Writes through a temporary file and renames it into place, so OkHttp's other threads,
+     * which may need the same file at the same moment, never read a half-written one.
+     */
+    private fun writeAtomically(target: File, write: (File) -> Unit) {
+        val tmp = File.createTempFile(target.name, ".tmp", target.parentFile)
+        try {
+            write(tmp)
+            if (!tmp.renameTo(target)) throw IOException("cannot rename ${tmp.name}")
+        } finally {
+            tmp.delete()
         }
     }
 
@@ -247,7 +261,6 @@ class TiandituActivity : Activity() {
         val line = "$what: lat/lon tiles fetched ${stats(fetchMs)}; from cache $cached; failed $failed; warped ${stats(warpMs)}"
         fetchMs.clear()
         warpMs.clear()
-        fetched = 0
         cached = 0
         failed = 0
         line
