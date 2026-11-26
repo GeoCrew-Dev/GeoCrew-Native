@@ -218,15 +218,16 @@ class TiandituActivity : Activity() {
             .body(ByteArray(0).toResponseBody(null)).build()
     }
 
-    private fun start(map: MapLibreMap, mode: String) {
+    private fun start(map: MapLibreMap, modeArg: String) {
         this.map = map
+        val mode = if (modeArg == "w") "w/" + (intent.getStringExtra("layer") ?: "vec") else modeArg
         map.uiSettings.isLogoEnabled = false
         map.uiSettings.isAttributionEnabled = false
         val style = when {
             mode == "c" -> STYLE_C
-            intent.getStringExtra("layer") == "img" -> styleW("img", "cia")
+            mode == "w/img" -> styleW("img", "cia")
             else -> styleW("vec", "cva")
-        }.replace("KEY", key)
+        }.replace("@TK@", key)
         map.setStyle(Style.Builder().fromJson(style)) {
             map.cameraPosition = CameraPosition.Builder().target(LatLng(39.91, 116.40)).zoom(10.0).build()
             val t0 = SystemClock.elapsedRealtime()
@@ -342,12 +343,15 @@ class TiandituActivity : Activity() {
         const val TAG = "GeoCrewTdt"
         const val TILE_HOST = "geocrew.tiles"
 
-        private const val W = "https://t0.tianditu.gov.cn/@L@_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=@L@&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=KEY"
+        /** One Tianditu host; tiles are spread over t0 to t7 like the lat/lon path does. */
+        private const val W = "https://t@N@.tianditu.gov.cn/@L@_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=@L@&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=@TK@"
+
+        private fun hosts(layer: String) = (0..7).joinToString(",") { "\"${W.replace("@N@", "$it").replace("@L@", layer)}\"" }
 
         /** A Tianditu Web Mercator base layer (vec, img) and its labels (cva, cia), straight from Tianditu. */
         fun styleW(base: String, labels: String) =
-            """{"version":8,"sources":{"base":{"type":"raster","tiles":["${W.replace("@L@", base)}"],"tileSize":256,"maxzoom":18},""" +
-                """"labels":{"type":"raster","tiles":["${W.replace("@L@", labels)}"],"tileSize":256,"maxzoom":18}},""" +
+            """{"version":8,"sources":{"base":{"type":"raster","tiles":[${hosts(base)}],"tileSize":256,"maxzoom":18},""" +
+                """"labels":{"type":"raster","tiles":[${hosts(labels)}],"tileSize":256,"maxzoom":18}},""" +
                 """"layers":[{"id":"bg","type":"background","paint":{"background-color":"#f2efe9"}},{"id":"base","type":"raster","source":"base"},{"id":"labels","type":"raster","source":"labels"}]}"""
 
         /** The lat/lon vector map, warped in the app. */
