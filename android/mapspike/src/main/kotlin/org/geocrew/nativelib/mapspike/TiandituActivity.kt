@@ -34,7 +34,8 @@ import org.maplibre.android.maps.Style
 /**
  * M1 spike: 天地图 (Tianditu) base maps with the owner's key.
  *
- * - mode "w" (default): Tianditu's Web Mercator tiles (vec_w + cva_w) straight into MapLibre.
+ * - mode "w" (default): Tianditu's Web Mercator tiles straight into MapLibre: the vector map
+ *   (vec_w + cva_w), or with `--es layer img` the imagery (img_w + cia_w).
  * - mode "c": Tianditu's lat/lon tiles (vec_c, TILEMATRIXSET=c) warped to Web Mercator on
  *   request: for each tile MapLibre asks for, the lat/lon tiles that cover it are fetched,
  *   stitched, described by a VRT in EPSG:4326 and warped by GeoCrewNative.renderTile.
@@ -43,6 +44,9 @@ import org.maplibre.android.maps.Style
  * `adb shell run-as`), never from the source or the APK, and is never logged.
  * Fetched lat/lon tiles are kept in cache/tdt-c so a rerun does not use the daily quota again.
  * Logs under the tag "GeoCrewTdt".
+ *
+ * MapLibre's logo and attribution button are hidden: the license (BSD-2-Clause) does not ask for
+ * them, and the real app shows its own data attribution (Tianditu's 审图号).
  *
  * Start: adb shell am start -n org.geocrew.nativelib.mapspike/.TiandituActivity --es mode c
  */
@@ -216,7 +220,13 @@ class TiandituActivity : Activity() {
 
     private fun start(map: MapLibreMap, mode: String) {
         this.map = map
-        val style = if (mode == "c") STYLE_C else STYLE_W.replace("KEY", key)
+        map.uiSettings.isLogoEnabled = false
+        map.uiSettings.isAttributionEnabled = false
+        val style = when {
+            mode == "c" -> STYLE_C
+            intent.getStringExtra("layer") == "img" -> styleW("img", "cia")
+            else -> styleW("vec", "cva")
+        }.replace("KEY", key)
         map.setStyle(Style.Builder().fromJson(style)) {
             map.cameraPosition = CameraPosition.Builder().target(LatLng(39.91, 116.40)).zoom(10.0).build()
             val t0 = SystemClock.elapsedRealtime()
@@ -334,10 +344,11 @@ class TiandituActivity : Activity() {
 
         private const val W = "https://t0.tianditu.gov.cn/@L@_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=@L@&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=KEY"
 
-        /** Tianditu's Web Mercator vector map and its labels, straight from Tianditu. */
-        val STYLE_W = """{"version":8,"sources":{"vec":{"type":"raster","tiles":["${W.replace("@L@", "vec")}"],"tileSize":256,"maxzoom":18},""" +
-            """"cva":{"type":"raster","tiles":["${W.replace("@L@", "cva")}"],"tileSize":256,"maxzoom":18}},""" +
-            """"layers":[{"id":"bg","type":"background","paint":{"background-color":"#f2efe9"}},{"id":"vec","type":"raster","source":"vec"},{"id":"cva","type":"raster","source":"cva"}]}"""
+        /** A Tianditu Web Mercator base layer (vec, img) and its labels (cva, cia), straight from Tianditu. */
+        fun styleW(base: String, labels: String) =
+            """{"version":8,"sources":{"base":{"type":"raster","tiles":["${W.replace("@L@", base)}"],"tileSize":256,"maxzoom":18},""" +
+                """"labels":{"type":"raster","tiles":["${W.replace("@L@", labels)}"],"tileSize":256,"maxzoom":18}},""" +
+                """"layers":[{"id":"bg","type":"background","paint":{"background-color":"#f2efe9"}},{"id":"base","type":"raster","source":"base"},{"id":"labels","type":"raster","source":"labels"}]}"""
 
         /** The lat/lon vector map, warped in the app. */
         const val STYLE_C = """{"version":8,"sources":{"c":{"type":"raster","tiles":["https://$TILE_HOST/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":18}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#f2efe9"}},{"id":"c","type":"raster","source":"c"}]}"""
