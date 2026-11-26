@@ -18,6 +18,10 @@ object Coordinates {
      * transform comes back as NaN, NaN. Throws [IllegalArgumentException] for a
      * CRS GDAL does not know, a pair of CRSs it cannot transform between, or an
      * odd number of values.
+     *
+     * Between datums PROJ knows no transformation for, it uses a "ballpark" one
+     * that shifts nothing and can be metres off (Xian 1980 to CGCS2000, say);
+     * CGCS2000 and WGS84 are within centimetres, as ADR 0015 takes them.
      */
     @JvmStatic external fun transform(from: String, to: String, xy: DoubleArray): DoubleArray
 
