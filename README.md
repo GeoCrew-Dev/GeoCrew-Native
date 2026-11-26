@@ -4,7 +4,7 @@
 
 > 状态：安卓 arm64-v8a / x86_64 的 GDAL、PROJ、GEOS 已能编出并打成 AAR，在模拟器和一台真机（三星 Galaxy S24 Ultra，安卓 16）上验证过。还没有正式发布；主仓库的新客户端直接用 CI 产出的 AAR。
 >
-> 矢量数据接口 `VectorDataset`（打开、建层、逐条读写要素、事务、SQL）在 S24 Ultra 上跑通了仪器测试。
+> 矢量数据接口 `VectorDataset`（打开、建层、逐条读写要素、事务、SQL）在 S24 Ultra 上跑通了仪器测试。坐标换算接口 `Coordinates`（坐标系之间批量换算、查坐标系信息）只在模拟器上跑过仪器测试，算实验。
 
 ## 做法
 

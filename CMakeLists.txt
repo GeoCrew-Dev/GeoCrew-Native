@@ -11,7 +11,7 @@ find_package(GEOS CONFIG REQUIRED)
 if(ANDROID)
     # The library the app loads. GDAL, PROJ and their static dependencies are linked
     # in with their symbols hidden; GEOS and GNU libiconv (LGPL) stay separate .so files.
-    add_library(geocrew_native SHARED src/geocrew_jni.cpp src/vector_jni.cpp)
+    add_library(geocrew_native SHARED src/geocrew_jni.cpp src/vector_jni.cpp src/coordinates_jni.cpp)
     target_link_libraries(geocrew_native PRIVATE GDAL::GDAL PROJ::proj GEOS::geos_c)
     target_link_options(geocrew_native PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-sections)
 
